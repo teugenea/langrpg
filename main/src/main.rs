@@ -1,9 +1,20 @@
-use std::{net::SocketAddr, borrow::Cow, ops::ControlFlow};
+use std::{net::SocketAddr, ops::ControlFlow};
+use std::time::{Duration, Instant};
 
-use axum::{extract::{WebSocketUpgrade, ConnectInfo, ws::{WebSocket, Message, CloseFrame}}, response::IntoResponse, TypedHeader, headers, Router, routing::get};
-use tower_http::trace::{TraceLayer, DefaultMakeSpan};
+use axum::{Error, extract::{
+    ConnectInfo,
+    WebSocketUpgrade, ws::{Message, WebSocket},
+}, headers, response::IntoResponse, Router, routing::get, TypedHeader};
+use futures::stream::StreamExt;
+use futures_util::SinkExt;
+use futures_util::stream::SplitStream;
+use tokio::time::timeout;
+use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use futures::{sink::SinkExt, stream::StreamExt};
+
+use crate::client::WsClient;
+
+pub mod client;
 
 // https://github.com/tokio-rs/axum/blob/v0.6.x/examples/websockets/src/main.rs
 
@@ -17,7 +28,7 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-        let app = Router::new()
+    let app = Router::new()
         // .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
         .route("/ws", get(ws_handler))
         // logging so we can see whats going on
@@ -38,34 +49,50 @@ async fn main() {
 async fn ws_handler(
     ws: WebSocketUpgrade,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, addr))
+    ws.on_upgrade(move |socket| {
+        handle_socket(socket, addr)
+    })
 }
 
 async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
     let (mut sender, mut receiver) = socket.split();
-    
-    let mut send_task = tokio::spawn(async move {
-        
-    });
 
-    // This second task will receive messages from client and print them on server console
-    let mut recv_task = tokio::spawn(async move {
-        let mut cnt = 0;
-        while let Some(Ok(msg)) = receiver.next().await {
-            cnt += 1;
-            // print message and break if instructed to do so
-            if process_message(msg, who).is_break() {
-                break;
+    tokio::spawn(async move {
+        let mut client = WsClient::new();
+        loop {
+            match get_message(&mut receiver).await {
+                Err(_) => match sender.send(Message::Ping(vec![1, 2, 3])).await {
+                    Ok(_) => {}
+                    Err(_) => {
+                        break;
+                    }
+                }
+                Ok(msg) => match msg {
+                    None => break,
+                    Some(m) => if process_message(m, who).is_break() {
+                        break;
+                    }
+                }
             }
         }
-        cnt
     });
+}
 
-    // returning from the handler closes the websocket connection
-    println!("Websocket context {} destroyed", who);
-
+async fn get_message(receiver: &mut SplitStream<WebSocket>) -> Result<Option<Message>, Error> {
+    match timeout(Duration::from_millis(5000), receiver.next()).await {
+        Ok(t) => match t {
+            Some(m) => {
+                return match m {
+                    Ok(msg) => Ok(Some(msg)),
+                    Err(e) => Err(e)
+                };
+            }
+            None => Ok(None)
+        }
+        Err(e) => Err(Error::new("Timeout"))
+    }
 }
 
 fn process_message(msg: Message, who: SocketAddr) -> ControlFlow<(), ()> {
