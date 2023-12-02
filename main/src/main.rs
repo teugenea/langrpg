@@ -1,22 +1,25 @@
 use std::{net::SocketAddr, ops::ControlFlow};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use axum::{Error, extract::{
     ConnectInfo,
     WebSocketUpgrade, ws::{Message, WebSocket},
-}, headers, response::IntoResponse, Router, routing::get, TypedHeader};
+}, response::IntoResponse, Router, routing::get};
+use axum_extra::TypedHeader;
 use futures::stream::StreamExt;
 use futures_util::SinkExt;
 use futures_util::stream::SplitStream;
 use tokio::time::timeout;
-use tower_http::trace::{DefaultMakeSpan, TraceLayer};
+use tracing::Instrument;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::client::WsClient;
+use crate::command::Command;
+use crate::state_dispatcher::StateDispatcher;
 
 pub mod client;
-
-// https://github.com/tokio-rs/axum/blob/v0.6.x/examples/websockets/src/main.rs
+mod command;
+mod states;
+mod state_dispatcher;
 
 #[tokio::main]
 async fn main() {
@@ -29,21 +32,10 @@ async fn main() {
         .init();
 
     let app = Router::new()
-        // .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
-        .route("/ws", get(ws_handler))
-        // logging so we can see whats going on
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(DefaultMakeSpan::default().include_headers(true)),
-        );
+        .route("/ws", get(ws_handler));
 
-    // run it with hyper
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    tracing::debug!("listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
 }
 
 async fn ws_handler(
@@ -60,7 +52,7 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
     let (mut sender, mut receiver) = socket.split();
 
     tokio::spawn(async move {
-        let mut client = WsClient::new();
+        let mut d = StateDispatcher::new();
         loop {
             match get_message(&mut receiver).await {
                 Err(_) => match sender.send(Message::Ping(vec![1, 2, 3])).await {
@@ -71,7 +63,7 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
                 }
                 Ok(msg) => match msg {
                     None => break,
-                    Some(m) => if process_message(m, who).is_break() {
+                    Some(m) => if process_message(m, who, &mut d).is_break() {
                         break;
                     }
                 }
@@ -95,9 +87,10 @@ async fn get_message(receiver: &mut SplitStream<WebSocket>) -> Result<Option<Mes
     }
 }
 
-fn process_message(msg: Message, who: SocketAddr) -> ControlFlow<(), ()> {
+fn process_message(msg: Message, who: SocketAddr, state_dispatcher: &mut StateDispatcher) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t) => {
+            state_dispatcher.dispatch_command(Command::Move {x: 1, y: 1});
             println!(">>> {} sent str: {:?}", who, t);
         }
         Message::Binary(d) => {
