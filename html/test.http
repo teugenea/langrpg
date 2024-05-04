@@ -1,2 +1,3 @@
-GET http://localhost:3000/rs
+
+GET http://psyduck.home:3000/rs
 Authorization: Bearer 12333

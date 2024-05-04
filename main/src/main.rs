@@ -1,10 +1,8 @@
-use auth::AuthState;
+use app_state::AppState;
 use axum::{
     Router, routing::get,
-    middleware::{self},
-    extract::State
+    middleware::{self}
 };
-use casdoor_rust_sdk::CasdoorConfig;
 use std::net::SocketAddr;
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -12,6 +10,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod client;
 mod auth;
 mod ws;
+mod config;
+mod app_state;
+mod route;
 
 #[tokio::main]
 async fn main() {
@@ -28,22 +29,9 @@ async fn main() {
 
     }
     
-    let ws = Router::new()
-        .route("/ws", get(ws::ws_handler))
-        .layer(middleware::from_fn(auth::ws_auth));
-    let restricted = Router::new()
-        .route("/rs", get(restricted))
-        .with_state(AuthState::new());
-    let app = Router::new()
-        .nest("", ws)
-        .nest("", restricted);
+    let app_state = AppState::new();
+    let app = route::routes(app_state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("psyduck.home:3000").await.unwrap();
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
-}
-
-async fn restricted(claims: auth::Claims) -> Result<String, auth::AuthError> {
-    Ok(format!(
-        "Welcome to the protected area :)\nYour data:\n{claims}",
-    ))
 }
