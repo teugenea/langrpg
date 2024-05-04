@@ -1,4 +1,4 @@
-use axum::{extract::Host, http::Uri, middleware, routing::get, Router};
+use axum::{middleware, routing::get, Router};
 
 use crate::{app_state::AppState, auth, ws};
 
@@ -11,11 +11,12 @@ pub fn routes(app_state: AppState) -> Router {
         .layer(middleware::from_fn_with_state(app_state.clone(), auth::ws_auth));
     let restricted = Router::new()
         .route("/rs", get(restricted));
-    // let accessible = Router::new()
-        // .route("auth", )
+     let accessible = Router::new()
+        .route(PATH_AUTH, get(auth::auth_by_code));
     Router::new()
         .nest("", ws)
         .nest("", restricted)
+        .nest("", accessible)
         .with_state(app_state)
 }
 
