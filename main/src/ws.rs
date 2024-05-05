@@ -14,11 +14,15 @@ use tokio::time::timeout;
 use std::{net::SocketAddr, ops::ControlFlow};
 use std::time::Duration;
 
+use crate::auth::Claims;
+
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     _: Option<TypedHeader<headers::UserAgent>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    claims: Claims
 ) -> impl IntoResponse {
+    tracing::debug!("{}", claims);
     ws.on_upgrade(move |socket| {
         handle_socket(socket, addr)
     })

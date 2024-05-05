@@ -1,3 +1,4 @@
+use headers::HeaderMapExt;
 use jsonwebtoken::{decode, Algorithm, Validation};
 use serde::{Deserialize, Serialize};
 use axum::{
@@ -32,10 +33,13 @@ pub async fn ws_auth(state: State<AppState>, request: Request, next: Next)
     
     let token: Query<WsAuthQuery> = Query::try_from_uri(request.uri())
         .map_err(|_| (StatusCode::UNAUTHORIZED, "Cannot get token").into_response())?;
-    parse_token(&token.0.t, "".to_owned())
+    
+    let (mut parts, body) = request.into_parts();
+    let auth_header = Authorization::bearer(&token.t)
         .map_err(|_| (StatusCode::UNAUTHORIZED, "Cannot get token").into_response())?;
+    parts.headers.typed_insert(auth_header);
 
-    Ok(next.run(request).await)
+    Ok(next.run(Request::from_parts(parts, body)).await)
 }
 
 pub async fn auth_by_code(state: State<AppState>, query: Query<AuthQuery>) 
@@ -106,9 +110,9 @@ impl IntoResponse for AuthError {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    id: String,
-    name: String,
-    groups: Vec<String>
+    pub id: String,
+    pub name: String,
+    pub groups: Vec<String>
 }
 
 impl Display for Claims {
