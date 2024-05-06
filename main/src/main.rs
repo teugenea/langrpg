@@ -32,6 +32,8 @@ async fn main() {
     let app_state = AppState::new();
     let app = route::routes(app_state);
 
-    let listener = tokio::net::TcpListener::bind("psyduck.home:3000").await.unwrap();
+    let host = config::load_env_var(config::HOST, "127.0.0.1");
+    let port = config::load_env_var(config::PORT, "3000");
+    let listener = tokio::net::TcpListener::bind(format!("{host}:{port}")).await.unwrap();
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
 }

@@ -32,11 +32,11 @@ pub async fn ws_auth(state: State<AppState>, request: Request, next: Next)
     -> Result<impl IntoResponse, Response> {
     
     let token: Query<WsAuthQuery> = Query::try_from_uri(request.uri())
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Cannot get token").into_response())?;
+        .map_err(|err| (StatusCode::UNAUTHORIZED, "Cannot get token").into_response())?;
     
     let (mut parts, body) = request.into_parts();
     let auth_header = Authorization::bearer(&token.t)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Cannot get token").into_response())?;
+        .map_err(|err| (StatusCode::UNAUTHORIZED, "Cannot get token").into_response())?;
     parts.headers.typed_insert(auth_header);
 
     Ok(next.run(Request::from_parts(parts, body)).await)

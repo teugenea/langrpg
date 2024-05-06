@@ -10,6 +10,8 @@ pub const IAM_CLIENT_SECRET: &str = "IAM_CLIENT_SECRET";
 pub const IAM_PUB_CERT_FILE: &str = "IAM_PUB_CERT_FILE";
 pub const IAM_ORG_NAME: &str = "IAM_ORG_NAME";
 pub const IAM_APP_NAME: &str = "IAM_APP_NAME";
+pub const HOST: &str = "HOST";
+pub const PORT: &str = "PORT";
 
 static JWT_CERT: Lazy<String> = Lazy::new(||{
     let cert_file_path = load_env_var_or_fail(IAM_PUB_CERT_FILE);

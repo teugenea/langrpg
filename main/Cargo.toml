@@ -13,7 +13,7 @@ futures = { workspace = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
-headers = "0.4.0"
+headers = { workspace = true }
 serde = { workspace = true }
 casdoor-rust-sdk = { workspace = true }
 serde_json = { workspace = true }
