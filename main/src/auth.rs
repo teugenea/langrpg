@@ -12,7 +12,7 @@ use axum_extra::{
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
-use std::fmt::Display;
+use std::{error::Error, fmt::Display};
 
 use crate::{app_state::AppState, config};
 use crate::route;
@@ -28,15 +28,15 @@ pub struct AuthQuery {
     state: String
 }
 
-pub async fn ws_auth(state: State<AppState>, request: Request, next: Next) 
+pub async fn ws_auth(_state: State<AppState>, request: Request, next: Next) 
     -> Result<impl IntoResponse, Response> {
     
     let token: Query<WsAuthQuery> = Query::try_from_uri(request.uri())
-        .map_err(|err| (StatusCode::UNAUTHORIZED, "Cannot get token").into_response())?;
+        .map_err(|err| AuthError::from_err("Cannot extract token", Box::new(err), StatusCode::UNAUTHORIZED).into_response())?;
     
     let (mut parts, body) = request.into_parts();
     let auth_header = Authorization::bearer(&token.t)
-        .map_err(|err| (StatusCode::UNAUTHORIZED, "Cannot get token").into_response())?;
+        .map_err(|err| AuthError::from_err("Cannot extract token", Box::new(err), StatusCode::UNAUTHORIZED).into_response())?;
     parts.headers.typed_insert(auth_header);
 
     Ok(next.run(Request::from_parts(parts, body)).await)
@@ -49,7 +49,7 @@ pub async fn auth_by_code(state: State<AppState>, query: Query<AuthQuery>)
     let token = tokio::task::block_in_place(move || {
         state.auth_service()
             .get_auth_token(code)
-            .map_err(|err| AuthError::ServerError(format!("Cannot get token by code: {}", err)))
+            .map_err(|err| AuthError::from_err("Cannot get token by code", err, StatusCode::UNAUTHORIZED))
     })?;
     
     Ok(token)
@@ -69,7 +69,7 @@ where
         let Host(hostname) = parts
             .extract::<Host>()
             .await
-            .map_err(|_| AuthError::ServerError("Cannot extract hostname".to_owned()))?;
+            .map_err(|err| AuthError::from_err("Cannot extract host", Box::new(err), StatusCode::INTERNAL_SERVER_ERROR))?;
 
         let redirect_uri = st.auth_service()
             .get_signin_url("http://".to_owned() + &hostname + route::PATH_AUTH);
@@ -77,7 +77,7 @@ where
         let TypedHeader(Authorization(bearer)) = parts
             .extract::<TypedHeader<Authorization<Bearer>>>()
             .await
-            .map_err(|_| AuthError::WithRedirect(redirect_uri.clone()))?;
+            .map_err(|err| AuthError::from_err_redirect("Cannot extract token", Box::new(err), redirect_uri.clone()))?;
         
         parse_token(bearer.token(), redirect_uri)
     }
@@ -88,23 +88,48 @@ fn parse_token(token: &str, redirect_uri: String) -> Result<Claims, AuthError> {
     validation.set_audience(&[config::load_env_var_or_fail(config::IAM_CLIENT_ID)]);
     let token_data = 
         decode::<Claims>(token, &config::JWT_DECODING_KEY, &validation)
-        .map_err(|_| AuthError::WithRedirect(redirect_uri))?;
+            .map_err(|err| AuthError::from_err_redirect("Cannot decode token", Box::new(err), redirect_uri))?;
 
     Ok(token_data.claims)
 }
 
 #[derive(Debug)]
-pub enum AuthError {
-    WithRedirect(String),
-    ServerError(String)
+pub struct  AuthError {
+    err: Box<dyn Error>,
+    status_code: StatusCode,
+    message: String,
+    redirect_uri: Option<String>
+}
+
+impl AuthError {
+
+    fn from_err_redirect(message: &str, err: Box<dyn Error>, redirect_uri: String) -> Self {
+        Self {
+            err,
+            status_code: StatusCode::PERMANENT_REDIRECT,
+            message: message.to_owned(),
+            redirect_uri: Some(redirect_uri)
+        }
+    }
+
+    fn from_err(message: &str, err: Box<dyn Error>, status_code: StatusCode) -> Self {
+        Self {
+            err,
+            status_code,
+            message: message.to_owned(),
+            redirect_uri: None
+        }
+    }
 }
 
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
-        match self {
-            AuthError::WithRedirect(uri) => Redirect::to(&uri).into_response(),
-            AuthError::ServerError(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response()
+        let msg = format!("{}: {}", self.message, self.err);
+        tracing::error!("{}", msg);
+        if let Some(uri) = self.redirect_uri {
+            return Redirect::to(&uri).into_response();
         }
+        (self.status_code, msg).into_response()
     }
 }
 
