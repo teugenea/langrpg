@@ -2,11 +2,10 @@ use headers::HeaderMapExt;
 use jsonwebtoken::{decode, Algorithm, Validation};
 use serde::{Deserialize, Serialize};
 use axum::{
-    async_trait, extract::{
-        FromRef, FromRequestParts, Host, Query, Request, State
-    }, http::{request::Parts, StatusCode}, 
-    middleware::Next, response::{IntoResponse, Redirect, Response}, 
-    RequestPartsExt
+    extract::{
+        FromRef, FromRequestParts, Query, Request, State
+    }, http::{request::Parts, StatusCode},
+    middleware::Next, response::{IntoResponse, Redirect, Response},
 };
 use axum_extra::{
     headers::{authorization::Bearer, Authorization},
@@ -55,7 +54,7 @@ pub async fn auth_by_code(state: State<AppState>, query: Query<AuthQuery>)
     Ok(token)
 }
 
-#[async_trait]
+//#[async_trait::async_trait]
 impl<S> FromRequestParts<S> for Claims
 where
     S: Send + Sync,
@@ -63,22 +62,33 @@ where
 {
     type Rejection = AuthError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
         let st = AppState::from_ref(state);
 
-        let Host(hostname) = parts
-            .extract::<Host>()
-            .await
-            .map_err(|err| AuthError::from_err("Cannot extract host", Box::new(err), StatusCode::INTERNAL_SERVER_ERROR))?;
+        let hostname = parts
+            .headers
+            .get("host")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("localhost");
 
-        let redirect_uri = st.auth_service()
-            .get_signin_url("http://".to_owned() + &hostname + route::PATH_AUTH);
+        let redirect_uri = st
+            .auth_service()
+            .get_signin_url(format!("http://{}{}", hostname, route::PATH_AUTH));
 
-        let TypedHeader(Authorization(bearer)) = parts
-            .extract::<TypedHeader<Authorization<Bearer>>>()
-            .await
-            .map_err(|err| AuthError::from_err_redirect("Cannot extract token", Box::new(err), redirect_uri.clone()))?;
-        
+        let TypedHeader(Authorization(bearer)) =
+            TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
+                .await
+                .map_err(|err| {
+                    AuthError::from_err_redirect(
+                        "Cannot extract token",
+                        Box::new(err),
+                        redirect_uri.clone(),
+                    )
+                })?;
+
         parse_token(bearer.token(), redirect_uri)
     }
 }

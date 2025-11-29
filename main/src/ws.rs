@@ -4,7 +4,7 @@ use axum::{
         ConnectInfo, WebSocketUpgrade,
         ws::{Message, WebSocket}
     },
-    response::{IntoResponse, Response},
+    response::{IntoResponse},
 };
 use axum_extra::TypedHeader;
 use futures::stream::StreamExt;
@@ -13,6 +13,7 @@ use futures_util::stream::SplitStream;
 use tokio::time::timeout;
 use std::{net::SocketAddr, ops::ControlFlow};
 use std::time::Duration;
+use bytes::Bytes;
 
 use crate::auth::Claims;
 
@@ -34,7 +35,7 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr) {
     tokio::spawn(async move {
         loop {
             match get_message(&mut receiver).await {
-                Err(_) => match sender.send(Message::Ping(vec![])).await {
+                Err(_) => match sender.send(Message::Ping(Bytes::new())).await {
                     Ok(_) => {}
                     Err(_) => {
                         break;
