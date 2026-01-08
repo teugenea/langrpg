@@ -1,8 +1,10 @@
 use axum::{
     Error,
+    Extension,
     extract::{
         ConnectInfo, WebSocketUpgrade,
-        ws::{Message, WebSocket}
+        ws::{Message, WebSocket},
+        State,
     },
     response::{IntoResponse},
 };
@@ -15,21 +17,22 @@ use std::{net::SocketAddr, ops::ControlFlow};
 use std::time::Duration;
 use bytes::Bytes;
 
-use crate::auth::Claims;
+use crate::{app_state::AppState, auth::Claims};
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     _: Option<TypedHeader<headers::UserAgent>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    claims: Claims
+    State(state): State<AppState>,
 ) -> impl IntoResponse {
-    tracing::debug!("{}", claims);
+    //tracing::debug!("{}", claims);
     ws.on_upgrade(move |socket| {
         handle_socket(socket, addr)
     })
 }
 
 async fn handle_socket(socket: WebSocket, who: SocketAddr) {
+
     let (mut sender, mut receiver) = socket.split();
 
     tokio::spawn(async move {

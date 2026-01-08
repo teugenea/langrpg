@@ -27,9 +27,11 @@ pub struct AuthQuery {
     state: String
 }
 
-pub async fn ws_auth(_state: State<AppState>, request: Request, next: Next) 
+pub async fn ws_auth(_state: State<AppState>, request: Request<axum::body::Body>, next: Next) 
     -> Result<impl IntoResponse, Response> {
     
+    request.headers().iter().for_each(|f| tracing::info!("{}: {}", f.0, f.1.to_str().unwrap()));
+
     let token: Query<WsAuthQuery> = Query::try_from_uri(request.uri())
         .map_err(|err| AuthError::from_err("Cannot extract token", Box::new(err), StatusCode::UNAUTHORIZED).into_response())?;
     

@@ -7,16 +7,16 @@ pub const PATH_AUTH: &str = "/auth";
 
 pub fn routes(app_state: AppState) -> Router {
     let ws = Router::new()
-        .route(PATH_WS, get(ws::ws_handler))
-        .layer(middleware::from_fn_with_state(app_state.clone(), auth::ws_auth));
+        .route(PATH_WS, get(ws::ws_handler));
+        //.layer(middleware::from_fn_with_state(app_state.clone(), auth::ws_auth));
     let restricted = Router::new()
         .route("/rs", get(restricted));
      let accessible = Router::new()
         .route(PATH_AUTH, get(auth::auth_by_code));
     Router::new()
-        .nest("", ws)
-        .nest("", restricted)
-        .nest("", accessible)
+        .merge(ws)
+        .merge(restricted)
+        .merge(accessible)
         .with_state(app_state)
 }
 

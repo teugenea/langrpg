@@ -19,5 +19,5 @@ CREATE TABLE IF NOT EXISTS game(
 
 CREATE TABLE IF NOT EXISTS item_type(
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    name varchar(255) unique not null,
-)
+    name varchar(255) unique not null
+);
