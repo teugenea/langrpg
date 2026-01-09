@@ -12,12 +12,12 @@ use axum_extra::TypedHeader;
 use futures::stream::StreamExt;
 use futures_util::SinkExt;
 use futures_util::stream::SplitStream;
-use tokio::time::timeout;
-use std::{net::SocketAddr, ops::ControlFlow};
+use tokio::{sync::Mutex, time::timeout};
+use std::{net::SocketAddr, ops::ControlFlow, sync::Arc};
 use std::time::Duration;
 use bytes::Bytes;
 
-use crate::{app_state::AppState, auth::Claims};
+use crate::{app_state::{AppState, ClientHandle, ClientsState}, auth::Claims, client::WsClient};
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -25,28 +25,34 @@ pub async fn ws_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    //tracing::debug!("{}", claims);
+    let clients = state.clients();
     ws.on_upgrade(move |socket| {
-        handle_socket(socket, addr)
+        handle_socket(socket, addr, clients)
     })
 }
 
-async fn handle_socket(socket: WebSocket, who: SocketAddr) {
-
+async fn handle_socket(socket: WebSocket, who: SocketAddr, clients: Arc<ClientsState>) {
     let (mut sender, mut receiver) = socket.split();
 
     tokio::spawn(async move {
+        let client = clients.insert_client(WsClient::new()).await;
+        tracing::info!("New client {}", client.lock().await.id());
         loop {
             match get_message(&mut receiver).await {
                 Err(_) => match sender.send(Message::Ping(Bytes::new())).await {
                     Ok(_) => {}
                     Err(_) => {
+                        stop_processing(clients, client).await;
                         break;
                     }
                 }
                 Ok(msg) => match msg {
-                    None => break,
+                    None => {
+                        stop_processing(clients, client).await;
+                        break;
+                    }
                     Some(m) => if process_message(m, who).is_break() {
+                        stop_processing(clients, client).await;
                         break;
                     }
                 }
@@ -101,4 +107,9 @@ fn process_message(msg: Message, who: SocketAddr) -> ControlFlow<(), ()> {
         }
     }
     ControlFlow::Continue(())
+}
+
+async fn stop_processing(clients: Arc<ClientsState>, client: ClientHandle) {
+    tracing::info!("Close client with id {}", client.lock().await.id());
+    clients.del_client(client.lock().await.id().to_string().as_str()).await;
 }

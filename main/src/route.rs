@@ -11,7 +11,7 @@ pub fn routes(app_state: AppState) -> Router {
         //.layer(middleware::from_fn_with_state(app_state.clone(), auth::ws_auth));
     let restricted = Router::new()
         .route("/rs", get(restricted));
-     let accessible = Router::new()
+    let accessible = Router::new()
         .route(PATH_AUTH, get(auth::auth_by_code));
     Router::new()
         .merge(ws)
